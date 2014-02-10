@@ -70,8 +70,19 @@ module HstoreAccessor
           send("#{hstore_attribute}_will_change!")
         end
 
+        # handy method for custom validators which need the original hstore data
+        #
+        # e.g. if an invalid date string is stored, validators
+        # (validate :a_date, ...) would calls the getter method to
+        # deserialize it which would result in exception
+        define_method("hstore_data_for_#{key}") do
+          h = send(hstore_attribute)
+          h && h.with_indifferent_access[store_key.to_s]
+        end
+
         define_method(key) do
-          value = send(hstore_attribute) && send(hstore_attribute).with_indifferent_access[store_key.to_s]
+          h = send(hstore_attribute)
+          value = h && h.with_indifferent_access[store_key.to_s]
           deserialize(data_type, value)
         end
 

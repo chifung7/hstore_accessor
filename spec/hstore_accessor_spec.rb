@@ -9,11 +9,28 @@ FIELDS = {
   build_timestamp: :time,
   tags: :array,
   reviews: :hash,
-  released_at: :date
+  released_at: :date,
+  suspended_on: :date,
 }
 
+class HstoreDateValidator < ActiveModel::EachValidator
+  def stored_in
+    options[:stored_in]
+  end
+
+  def validate_each(record, attribute, value)
+    Date.parse(value) if String === value
+  rescue => e
+    record.errors.add attribute, (options[:message] || "is not a valid date")
+  end
+end
+
 class Product < ActiveRecord::Base
+  include ActiveModel::Validations
+
   hstore_accessor :options, FIELDS
+  validates :released_at, hstore_date: { stored_in: :options }, allow_nil: true
+  validates :hstore_data_for_suspended_on, hstore_date: { stored_in: :options }, allow_nil: true
 end
 
 describe HstoreAccessor do
@@ -45,7 +62,7 @@ describe HstoreAccessor do
 
     it "stores using the store_key if one is provided" do
       product.weight = 38.5
-      product.save
+      product.save!
       product.reload
       expect(product.options["w"]).to eq "38.5"
       expect(product.weight).to eq 38.5
@@ -61,6 +78,15 @@ describe HstoreAccessor do
       expect(product.hstore_metadata_for_options).to eq FIELDS
     end
 
+  end
+
+  context "#hstore_data_for_*" do
+    let(:product) { Product.new }
+
+    it "returns the raw hstore data" do
+      product.weight = 42.3
+      expect(product.hstore_data_for_weight).to eq '42.3'
+    end
   end
 
   context "nil values" do
@@ -85,20 +111,36 @@ describe HstoreAccessor do
 
   end
 
+  context "validation" do
+
+    it 'raises exception for accessing invalid date string via default #released_at during validation' do
+      # this is the default behavior of the original code
+      product =  Product.new.tap { |p| p.options = {'released_at' => 'X'} }
+      expect { product.save! }.to raise_error(ArgumentError, %r/invalid date/)
+    end
+
+    it 'rejects invalid data string using custom valiator with #hstore_data_for_* method' do
+      product =  Product.new.tap { |p| p.options = {'suspended_on' => '2008-02-31'} }
+      product.should_not be_valid
+      product.errors.should be_include :hstore_data_for_suspended_on
+      product.errors[:hstore_data_for_suspended_on][0].should match %r/is not a valid date/
+    end
+  end
+
   describe "predicate methods" do
 
     let!(:product) { Product.new }
 
     it "return the state for true boolean fields" do
       product.popular = true
-      product.save
+      product.save!
       product.reload
       expect(product.popular?).to be_true
     end
 
     it "return the state for false boolean fields" do
       product.popular = false
-      product.save
+      product.save!
       product.reload
       expect(product.popular?).to be_false
     end
@@ -234,7 +276,7 @@ describe HstoreAccessor do
 
     it "correctly stores string values" do
       product.color = "blue"
-      product.save
+      product.save!
       product.reload
       expect(product.color).to eq "blue"
     end
@@ -259,28 +301,28 @@ describe HstoreAccessor do
 
     it "correctly stores integer values" do
       product.price = 468
-      product.save
+      product.save!
       product.reload
       expect(product.price).to eq 468
     end
 
     it "correctly stores float values" do
       product.weight = 93.45
-      product.save
+      product.save!
       product.reload
       expect(product.weight).to eq 93.45
     end
 
     it "correctly stores array values" do
       product.tags = ["household", "living room", "kitchen"]
-      product.save
+      product.save!
       product.reload
       expect(product.tags).to eq ["household", "living room", "kitchen"]
     end
 
     it "correctly stores hash values" do
       product.reviews = { "user_123" => "4 stars", "user_994" => "3 stars" }
-      product.save
+      product.save!
       product.reload
       expect(product.reviews).to eq({ "user_123" => "4 stars", "user_994" => "3 stars" })
     end
@@ -288,7 +330,7 @@ describe HstoreAccessor do
     it "correctly stores time values" do
       timestamp = Time.now - 10.days
       product.build_timestamp = timestamp
-      product.save
+      product.save!
       product.reload
       expect(product.build_timestamp.to_i).to eq timestamp.to_i
     end
@@ -296,7 +338,7 @@ describe HstoreAccessor do
     it "correctly stores date values" do
       datestamp = Date.today - 9.days
       product.released_at = datestamp
-      product.save
+      product.save!
       product.reload
       expect(product.released_at.to_s).to eq datestamp.to_s
       expect(product.released_at).to eq datestamp
@@ -306,14 +348,14 @@ describe HstoreAccessor do
 
       it "when string 'true' is passed" do
         product.popular = 'true'
-        product.save
+        product.save!
         product.reload
         expect(product.popular).to be_true
       end
 
       it "when a real boolean is passed" do
         product.popular = true
-        product.save
+        product.save!
         product.reload
         expect(product.popular).to be_true
       end
