@@ -30,7 +30,7 @@ class Product < ActiveRecord::Base
 
   hstore_accessor :options, FIELDS
   validates :released_at, hstore_date: { stored_in: :options }, allow_nil: true
-  validates :hstore_data_for_suspended_on, hstore_date: { stored_in: :options }, allow_nil: true
+  validates :serialized_suspended_on, hstore_date: { stored_in: :options }, allow_nil: true
 end
 
 describe HstoreAccessor do
@@ -80,12 +80,18 @@ describe HstoreAccessor do
 
   end
 
-  context "#hstore_data_for_*" do
+  context "#serialized_*" do
     let(:product) { Product.new }
 
     it "returns the raw hstore data" do
       product.weight = 42.3
-      expect(product.hstore_data_for_weight).to eq '42.3'
+      expect(product.serialized_weight).to eq '42.3'
+    end
+
+    it "set the serialized data" do
+      product.serialized_weight = '42.3'
+      expect(product.serialized_weight).to eq '42.3'
+      expect(product.weight).to eq 42.3
     end
   end
 
@@ -119,11 +125,11 @@ describe HstoreAccessor do
       expect { product.save! }.to raise_error(ArgumentError, %r/invalid date/)
     end
 
-    it 'rejects invalid data string using custom valiator with #hstore_data_for_* method' do
+    it 'rejects invalid data string using custom valiator with #serialized_* method' do
       product =  Product.new.tap { |p| p.options = {'suspended_on' => '2008-02-31'} }
       product.should_not be_valid
-      product.errors.should be_include :hstore_data_for_suspended_on
-      product.errors[:hstore_data_for_suspended_on][0].should match %r/is not a valid date/
+      product.errors.should be_include :serialized_suspended_on
+      product.errors[:serialized_suspended_on][0].should match %r/is not a valid date/
     end
   end
 
