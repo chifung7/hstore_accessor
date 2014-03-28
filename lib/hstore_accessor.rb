@@ -11,37 +11,62 @@ module HstoreAccessor
 
   SEPARATOR = "||;||"
 
-  DEFAULT_SERIALIZER = ->(value) { value.to_s }
-  DEFAULT_DESERIALIZER = DEFAULT_SERIALIZER
-
   SERIALIZERS = {
-    :array    => -> value { (value && value.join(SEPARATOR)) || nil },
-    :hash     => -> value { (value && value.to_json) || nil },
+    :array    => -> value { value.join(SEPARATOR) },
+    :hash     => -> value { value.to_json },
+    :integer  => -> value { value.to_s },
+    :float    => -> value { value.to_s },
     :time     => -> value { value.to_i },
-    :boolean  => -> value { (value.to_s == "true").to_s },
-    :date     => -> value { (value && value.to_s) || nil }
+    :boolean  => -> value { value.to_s },
+    :date     => -> value { value.to_s }
   }
 
   DESERIALIZERS = {
-    :array    => -> value { (value && value.split(SEPARATOR)) || nil },
-    :hash     => -> value { (value && JSON.parse(value)) || nil },
-    :integer  => -> value { value.to_i },
-    :float    => -> value { value.to_f },
-    :time     => -> value { Time.at(value.to_i) },
+    :array    => -> value { value.split(SEPARATOR) },
+    :hash     => -> value { JSON.parse(value) },
+    :integer  => -> value { Integer(value) },
+    :float    => -> value { Float(value) },
+    :time     => -> value { Time.at(Integer(value)) },
     :boolean  => -> value { value == "true" },
-    :date     => -> value { (value && Date.parse(value)) || nil }
+    :date     => -> value { Date.parse(value) }
   }
 
-  def serialize(type, value, serializer=nil)
+  def serialize(type, value)
     return nil if value.nil?
-    serializer ||= (SERIALIZERS[type] || DEFAULT_SERIALIZER)
-    serializer.call(value)
+
+    if String === value
+      if type == :string or
+          # need to parse the string to make sure it is a valid type 
+          ((DESERIALIZERS[type].call(value) || true) rescue false)
+        value
+      else
+        nil # not a valid object in string format
+      end
+    else
+      if type == :string
+        value.to_s  # or should just raise error
+      else
+        SERIALIZERS[type].call(value)
+      end
+    end
   end
 
-  def deserialize(type, value, deserializer=nil)
+  def deserialize(type, value)
     return nil if value.nil?
-    deserializer ||= (DESERIALIZERS[type] || DEFAULT_DESERIALIZER)
-    deserializer.call(value)
+
+    if String === value
+      if type == :string
+        value
+      else
+        DESERIALIZERS[type].call(value)
+      end
+    else
+      if type == :string
+        value.to_s
+      else
+        value
+      end
+    end
   end
 
   module ClassMethods
@@ -50,11 +75,11 @@ module HstoreAccessor
       fields.each do |key, type|
 
         data_type = type
-        store_key = key
+        store_key = key.to_s
         if type.is_a?(Hash)
           type = type.with_indifferent_access
           data_type = type[:data_type]
-          store_key = type[:store_key]
+          store_key = type[:store_key].to_s
         end
 
         data_type = data_type.to_sym
@@ -65,32 +90,29 @@ module HstoreAccessor
           fields
         end
 
+        attr_accessor "#{key}_before_type_cast".to_sym
+
         define_method("#{key}=") do |value|
-          send("#{hstore_attribute}=", (send(hstore_attribute) || {}).merge(store_key.to_s => serialize(data_type, value)))
-          send("#{hstore_attribute}_will_change!")
+          send("#{key}_before_type_cast=", value)
+
+          h = send(hstore_attribute) || {}
+          v = serialize(data_type, value)
+
+          unless h[store_key].nil? and v.nil?
+            send("#{hstore_attribute}=", h.merge(store_key => v))
+            send("#{hstore_attribute}_will_change!")
+          end
         end
 
         define_method(key) do
           h = send(hstore_attribute)
-          value = h && h.with_indifferent_access[store_key.to_s]
+          value = h && h.with_indifferent_access[store_key]
           deserialize(data_type, value)
         end
 
-        # handy method for custom validators which need the original hstore data
-        #
-        # e.g. if an invalid date string is stored, validators
-        # (validate :a_date, ...) would calls the getter method to
-        # deserialize it which would result in exception
-        define_method("serialized_#{key}") do
-          h = send(hstore_attribute)
-          h && h.with_indifferent_access[store_key.to_s]
-        end
-
-        alias_method "serialized_#{key}=", "#{key}="
-
         if type == :boolean
           define_method("#{key}?") do
-            return send("#{key}")
+            return send(key)
           end
         end
 

@@ -1,5 +1,6 @@
 require "spec_helper"
 require "active_support/all"
+require 'validates_timeliness'
 
 FIELDS = {
   color: :string,
@@ -12,25 +13,20 @@ FIELDS = {
   released_at: :date,
   suspended_on: :date,
 }
-
-class HstoreDateValidator < ActiveModel::EachValidator
-  def stored_in
-    options[:stored_in]
-  end
-
-  def validate_each(record, attribute, value)
-    Date.parse(value) if String === value
-  rescue => e
-    record.errors.add attribute, (options[:message] || "is not a valid date")
-  end
-end
-
 class Product < ActiveRecord::Base
   include ActiveModel::Validations
 
   hstore_accessor :options, FIELDS
-  validates :released_at, hstore_date: { stored_in: :options }, allow_nil: true
-  validates :serialized_suspended_on, hstore_date: { stored_in: :options }, allow_nil: true
+  validates_date :suspended_on
+
+  after_initialize :defaults
+  def defaults
+    # note: since allow_nil: true is used in validates_date, invalid
+    # date string will be truned into nil which will pass the
+    # validation. This is rails behavior of allow_nil. Work around is
+    # not using allow_nil, so we have to provide the default here
+    self.suspended_on ||= Date.new(2014,3,29)
+  end
 end
 
 describe HstoreAccessor do
@@ -80,18 +76,104 @@ describe HstoreAccessor do
 
   end
 
-  context "#serialized_*" do
+  context "with string fields" do
     let(:product) { Product.new }
 
-    it "returns the raw hstore data" do
-      product.weight = 42.3
-      expect(product.serialized_weight).to eq '42.3'
+    it "saves empty string" do
+      product.color = ''
+      expect(product.color).to eq ''
+      expect(product.color_before_type_cast).to eq ''
+      product.save!
+      expect(product.reload.color).to eq ''
+      expect(product.options['color']).to eq ''
     end
 
-    it "set the serialized data" do
-      product.serialized_weight = '42.3'
-      expect(product.serialized_weight).to eq '42.3'
-      expect(product.weight).to eq 42.3
+    it "saves nils" do
+      product.color = nil
+      expect(product.color).to be_nil
+      expect(product.color_before_type_cast).to eq nil
+      product.save!
+      expect(product.reload.color).to be_nil
+      expect(product.options).to eq({"suspended_on"=>"2014-03-29"})
+    end
+
+    it "automatically serialize non strings" do
+      dt = Date.new(2011,1,1)
+      product.color = dt
+      expect(product.color_before_type_cast).to eq dt
+      product.save!
+      expect(product.reload.color).to eq dt.to_s
+    end
+
+    it "skip saving nils" do
+      product.color = 'green'
+      product.save!
+      product.color = nil
+      product.save!
+      expect(product.reload.options).to eq({"color"=>nil, "suspended_on"=>"2014-03-29"})
+      product.color = nil
+      product.save!
+      expect(product.color).to be_nil
+      expect(product.reload.options).to eq({"color"=>nil, "suspended_on"=>"2014-03-29"})
+    end
+
+    it "saves nil if original is not nil" do
+      product.color = 'green'
+      product.save!
+      expect(product.color).to eq 'green'
+      product.color = nil
+      product.save!
+      expect(product.color).to be_nil
+      expect(product.options[:color]).to eq nil
+    end
+  end
+
+  context "with date fields" do
+    context "with date string" do
+      let(:product) { Product.new }
+      let(:date_str) { '2011-02-28' }
+      let(:date) { Date.new(2011,2,28) }
+
+      it "accepts nil" do
+        product.released_at = nil
+        product.save!
+        expect(product.reload.released_at).to be_nil
+      end
+
+      it "accepts date string" do
+        product.released_at = date_str
+        expect(product.released_at_before_type_cast).to eq date_str
+        product.save!
+        expect(product.reload.released_at).to eq date
+        expect(product.options['released_at']).to eq date_str
+      end
+
+      it "accepts date object" do
+        product.released_at = date
+        expect(product.released_at_before_type_cast).to eq date
+        product.save!
+        expect(product.reload.released_at).to eq date
+        expect(product.options['released_at']).to eq date_str
+      end
+    end
+
+    context "with invalid date string" do
+      let(:product) { Product.new }
+      it "does not store to hstore" do
+        product.suspended_on = '2011-02-30'
+        expect(product.suspended_on).to be_nil
+      end
+
+      it "keeps it in *_before_type_cast" do
+        product.suspended_on = '2011-02-30'
+        expect(product.suspended_on_before_type_cast).to eq '2011-02-30'
+      end
+
+      it "rejects by validation" do
+        product.suspended_on = '2011-02-30'
+        expect(product).not_to be_valid
+        expect(product.errors[:suspended_on][0]).to match /validxx/
+      end
     end
   end
 
@@ -102,13 +184,13 @@ describe HstoreAccessor do
     let!(:product)   { Product.new }
     let!(:product_a) { Product.create(color: "green",  price: 10, weight: 10.1, tags: ["tag1", "tag2", "tag3"], popular: true,  build_timestamp: (timestamp - 10.days), released_at: (datestamp - 8.days)) }
 
-    FIELDS.keys.each do |field|
+    FIELDS.keys.select{|k| k != :suspended_on}.each do |field|
       it "reponds with nil when #{field} is not set" do
         expect(product.send(field)).to be_nil
       end
     end
 
-    FIELDS.keys.each do |field|
+    FIELDS.keys.select{|k| k != :suspended_on}.each do |field|
       it "reponds with nil when #{field} is set back to nil after being set initially" do
         product_a.send("#{field}=", nil)
         expect(product_a.send(field)).to be_nil
@@ -118,18 +200,10 @@ describe HstoreAccessor do
   end
 
   context "validation" do
-
     it 'raises exception for accessing invalid date string via default #released_at during validation' do
       # this is the default behavior of the original code
       product =  Product.new.tap { |p| p.options = {'released_at' => 'X'} }
-      expect { product.save! }.to raise_error(ArgumentError, %r/invalid date/)
-    end
-
-    it 'rejects invalid data string using custom valiator with #serialized_* method' do
-      product =  Product.new.tap { |p| p.options = {'suspended_on' => '2008-02-31'} }
-      product.should_not be_valid
-      product.errors.should be_include :serialized_suspended_on
-      product.errors[:serialized_suspended_on][0].should match %r/is not a valid date/
+      expect { product.save! }.to raise_error(ActiveRecord::RecordInvalid, /suspended/)
     end
   end
 
