@@ -121,21 +121,27 @@ module HstoreAccessor
 
         case data_type
         when :string
-          send(:scope, "with_#{key}", -> value { where(eq_query_field, value.to_s) })
-        when :integer, :float
-          send(:scope, "#{key}_lt",  -> value { where("(#{query_field})::#{data_type} < ?", value.to_s) })
-          send(:scope, "#{key}_lte", -> value { where("(#{query_field})::#{data_type} <= ?", value.to_s) })
+          send(:scope, "with_#{key}", -> value { where(eq_query_field, value) })
+        when :integer
+          send(:scope, "#{key}_lt",  -> value { where("(#{query_field})::#{data_type} < ?", value) })
+          send(:scope, "#{key}_lte", -> value { where("(#{query_field})::#{data_type} <= ?", value) })
           send(:scope, "#{key}_eq",  -> value { where(eq_query_field, value.to_s) })
-          send(:scope, "#{key}_gte", -> value { where("(#{query_field})::#{data_type} >= ?", value.to_s) })
-          send(:scope, "#{key}_gt",  -> value { where("(#{query_field})::#{data_type} > ?", value.to_s) })
+          send(:scope, "#{key}_gte", -> value { where("(#{query_field})::#{data_type} >= ?", value) })
+          send(:scope, "#{key}_gt",  -> value { where("(#{query_field})::#{data_type} > ?", value) })
+        when :float
+          send(:scope, "#{key}_lt",  -> value { where("(#{query_field})::#{data_type} < ?", value) })
+          send(:scope, "#{key}_lte", -> value { where("(#{query_field})::#{data_type} <= ?", value) })
+          send(:scope, "#{key}_eq",  -> value { where("(#{query_field})::#{data_type} = ?", value) })
+          send(:scope, "#{key}_gte", -> value { where("(#{query_field})::#{data_type} >= ?", value) })
+          send(:scope, "#{key}_gt",  -> value { where("(#{query_field})::#{data_type} > ?", value) })
         when :time
           send(:scope, "#{key}_before", -> value { where("(#{query_field})::integer < ?", value.to_i) })
           send(:scope, "#{key}_eq",     -> value { where(eq_query_field, value.to_i.to_s) })
           send(:scope, "#{key}_after",  -> value { where("(#{query_field})::integer > ?", value.to_i) })
         when :date
-          send(:scope, "#{key}_before", -> value { where("#{query_field} < ?", value.to_s) })
+          send(:scope, "#{key}_before", -> value { where("#{query_field} < ?", value) })
           send(:scope, "#{key}_eq",     -> value { where(eq_query_field, value.to_s) })
-          send(:scope, "#{key}_after",  -> value { where("#{query_field} > ?", value.to_s) })
+          send(:scope, "#{key}_after",  -> value { where("#{query_field} > ?", value) })
         when :boolean
           send(:scope, "is_#{key}", -> { where(eq_query_field, 'true') })
           send(:scope, "not_#{key}", -> { where(eq_query_field, 'false') })

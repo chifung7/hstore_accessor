@@ -172,7 +172,7 @@ describe HstoreAccessor do
       it "rejects by validation" do
         product.suspended_on = '2011-02-30'
         expect(product).not_to be_valid
-        expect(product.errors[:suspended_on][0]).to match /validxx/
+        expect(product.errors[:suspended_on][0]).to match /valid/
       end
     end
   end
@@ -279,6 +279,13 @@ describe HstoreAccessor do
 
       it "equality" do
         expect(Product.weight_eq(10.1).to_a).to eq [product_a]
+      end
+
+      it "equality of same floating point values but different formats" do
+        product_a.options['weight'] = "10.100"
+        product_a.save!
+        expect(product_a.options['weight']).to eq "10.100"
+        expect(Product.weight_eq(10.1).to_a).to eq [product_a]        
       end
 
       it "greater than or equal" do
